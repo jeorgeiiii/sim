@@ -18,6 +18,8 @@
 
 <p align="center">A workspace to build, deploy and manage AI agents and workflows.</p>
 
+<p align="center"><strong>📐 <a href="https://jeorgeiiii.github.io/sim/" target="_blank" rel="noopener noreferrer">Architecture map: how Sim works</a></strong></p>
+
 ## Quickstart
 
 ### Cloud-hosted: [sim.ai](https://sim.ai)
