@@ -1,0 +1,238 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sim Architecture Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: layered dependency map (apps on top, shared packages below), click a node to trace it; runtime topology underneath. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#14181f; --muted:#5b6472; --line:#d5d9e0;
+  --app:#1f5eff; --app-bg:#e6edff; --pkg:#0f7b6c; --pkg-bg:#e1f3ef; --base:#7a5200; --base-bg:#fbefd2;
+  --edge:#9aa3b2; --hot:#d6336c; --up:#1f5eff;
+  --font:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1218; --panel:#171b23; --fg:#e8ebf0; --muted:#98a2b3; --line:#2b313c;
+  --app:#7ea2ff; --app-bg:#1c2640; --pkg:#4fd1bd; --pkg-bg:#12302b; --base:#f0c35a; --base-bg:#352a0e;
+  --edge:#4a5363; --hot:#ff7aa8; --up:#7ea2ff; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1218; --panel:#171b23; --fg:#e8ebf0; --muted:#98a2b3; --line:#2b313c;
+  --app:#7ea2ff; --app-bg:#1c2640; --pkg:#4fd1bd; --pkg-bg:#12302b; --base:#f0c35a; --base-bg:#352a0e;
+  --edge:#4a5363; --hot:#ff7aa8; --up:#7ea2ff; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.5;
+  padding-block:24px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{font-size:26px;margin:0 0 4px;text-wrap:balance}
+h2{font-size:17px;margin:0 0 8px}
+p{margin:0;color:var(--muted);max-width:68ch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.scroll{overflow-x:auto}
+svg{display:block;min-width:900px;width:100%;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--muted);margin-top:10px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.l-app::before{background:var(--app)}.l-pkg::before{background:var(--pkg)}.l-base::before{background:var(--base)}
+.l-out::before{background:var(--hot)}.l-in::before{background:var(--up)}
+#info{font-size:14px;min-height:44px;color:var(--fg)}
+#info code{font-family:var(--mono);font-size:13px}
+.node{cursor:pointer}
+.node rect{stroke-width:1.2}
+.node text{font-family:var(--mono);font-size:12px;fill:var(--fg);pointer-events:none}
+.node:focus{outline:none}.node:focus-visible rect{stroke-width:3}
+.edge{fill:none;stroke:var(--edge);stroke-width:1;opacity:.28}
+.edge.out{stroke:var(--hot);opacity:1;stroke-width:1.6}
+.edge.in{stroke:var(--up);opacity:1;stroke-width:1.6}
+.dim .edge:not(.out):not(.in){opacity:.06}
+.rowlabel{font-size:11px;letter-spacing:.08em;text-transform:uppercase;fill:var(--muted);font-family:var(--font)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+td code{font-family:var(--mono);font-size:12.5px}
+pre.mermaid{margin:0}
+.tbl{overflow-x:auto}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+
+</head><body><div class="wrap">
+  <header>
+    <h1>Sim architecture map</h1>
+    <p>Workspace layout of the Sim monorepo, read from each package's <code>package.json</code>, <code>turbo.json</code> and the Docker Compose files. Click any box to trace what it depends on and what depends on it.</p>
+  </header>
+
+  <section class="panel">
+    <h2>Workspace dependencies</h2>
+    <div id="info">Select a workspace to see its connections.</div>
+    <div class="scroll"><svg id="map" viewBox="0 0 1000 560" role="img" aria-label="Workspace dependency graph"></svg></div>
+    <div class="legend">
+      <span class="l-app">App or service</span><span class="l-pkg">Shared package</span><span class="l-base">Foundation package</span>
+      <span class="l-out">Depends on (selected)</span><span class="l-in">Used by (selected)</span>
+    </div>
+    <p style="margin-top:10px;font-size:13px">Every workspace also uses <code>@sim/tsconfig</code>, and tests use <code>@sim/testing</code>; both are left out so the lines stay readable. Arrows always point down: apps use packages, packages never import from apps.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Runtime topology (docker-compose.prod.yml)</h2>
+    <pre class="mermaid">
+flowchart LR
+  U[Browser / Desktop app] --> S[simstudio<br/>Next.js app + executor]
+  U <-->|Socket.IO| R[realtime<br/>Bun Socket.IO server]
+  R -->|internal HTTP + INTERNAL_API_SECRET| S
+  C[cron] --> S
+  M[migrations] --> D[(Postgres + pgvector)]
+  S --> D
+  R --> D
+  S --> X[(Redis)]
+    </pre>
+  </section>
+
+  <section class="panel">
+    <h2>How a workflow runs</h2>
+    <p style="margin-bottom:10px">Traced through folder and file names in <code>apps/sim</code>: the run route, <code>lib/execution</code>, <code>serializer</code>, <code>executor</code> and <code>providers</code>.</p>
+    <pre class="mermaid">
+flowchart TD
+  UI[Workspace UI<br/>app/workspace + stores] -->|POST /api/workflows/id/execute| API[Route adapter<br/>app/api/workflows/id/execute]
+  API --> PRE[Preprocessing and admission<br/>lib/execution]
+  PRE --> SER[Serializer<br/>workflow state to executable graph]
+  SER --> DAG[DAG builder<br/>executor/dag]
+  DAG --> ENG[Engine<br/>executor/execution/engine.ts]
+  ENG --> BE[Block executor + edge manager]
+  BE --> H{Handler registry<br/>executor/handlers}
+  H --> AG[agent] --> PROV[LLM providers<br/>providers/*]
+  H --> FN[function] --> SBX[isolated-vm sandbox]
+  H --> API2[api / generic] --> TOOLS[Tools registry<br/>tools/*]
+  H --> CTRL[condition, router, loop, parallel,<br/>wait, human-in-the-loop, workflow]
+  ENG --> BUF[Event buffer] -->|stream| UI
+  ENG --> DB[(Postgres via @sim/db<br/>logs and state)]
+    </pre>
+  </section>
+
+  <section class="panel">
+    <h2>What starts a run</h2>
+    <pre class="mermaid">
+flowchart LR
+  W[Webhook<br/>/api/webhooks/id] --> T[Trigger definitions<br/>apps/sim/triggers]
+  CR[cron container] -->|/api/schedules/execute| SC[Schedules]
+  M[Manual or API run<br/>/api/workflows/id/execute] --> X
+  T --> J[Background jobs<br/>apps/sim/background<br/>Trigger.dev SDK]
+  SC --> J
+  J --> X[Executor]
+  X --> R[(Postgres)]
+    </pre>
+  </section>
+
+  <section class="panel">
+    <h2>How a protected request is handled</h2>
+    <pre class="mermaid">
+flowchart LR
+  C[Client, v2 API, Copilot] --> A[Route adapter<br/>authenticate, build Principal,<br/>parse contract]
+  A -->|lib/api/contracts| K[Route contract]
+  A --> U[Application use case<br/>lib/domain/application]
+  U --> Z[@sim/platform-authz]
+  U --> D[(@sim/db)]
+  U --> AU[@sim/audit]
+    </pre>
+    <p style="margin-top:10px;font-size:13px">From CLAUDE.md: adapters never query protected data or decide authorization; every protected read and write goes through one use case.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Realtime editing and the PII service</h2>
+    <pre class="mermaid">
+flowchart LR
+  B1[Editor in browser] <-->|Socket.IO| RT[apps/realtime]
+  RT --> WP[@sim/workflow-persistence] --> DB[(Postgres)]
+  RT -->|internal HTTP + secret| APP[apps/sim]
+  APP -->|PII_URL<br/>lib/guardrails| PII[apps/pii<br/>Python, Presidio]
+    </pre>
+  </section>
+
+  <section class="panel">
+    <h2>What this page does not show</h2>
+    <p>The flows above are read from folder names, file names and the repo's own rules, not from stepping through every function. Not covered: Copilot and Mothership internals, billing, knowledge-base ingestion, the MCP server, and enterprise features in <code>ee/</code>. For file-level links, open the <a href="code-graph.html">generated code graph</a>.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Inside apps/sim</h2>
+    <p style="margin-bottom:10px">TypeScript file counts per top-level folder (tests included), for orientation before you run a file-level graph.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Folder</th><th>Files</th><th>What lives there</th></tr></thead>
+      <tbody>
+        <tr><td><code>tools/</code></td><td>7,054</td><td>Integration tool definitions, registered in <code>tools/registry.ts</code></td></tr>
+        <tr><td><code>lib/</code></td><td>6,916</td><td>Domain logic; use cases live in <code>lib/&lt;domain&gt;/application</code></td></tr>
+        <tr><td><code>app/</code></td><td>3,943</td><td>Next.js pages and <code>api/</code> routes (thin adapters over use cases)</td></tr>
+        <tr><td><code>triggers/</code></td><td>614</td><td>Event and webhook triggers</td></tr>
+        <tr><td><code>blocks/</code></td><td>409</td><td>Workflow blocks, registered in <code>blocks/registry-maps.ts</code></td></tr>
+        <tr><td><code>ee/</code></td><td>321</td><td>Enterprise features</td></tr>
+        <tr><td><code>hooks/</code></td><td>275</td><td>React hooks</td></tr>
+        <tr><td><code>executor/</code></td><td>208</td><td>Workflow execution engine</td></tr>
+        <tr><td><code>providers/</code></td><td>195</td><td>LLM provider adapters</td></tr>
+        <tr><td><code>components/</code>, <code>stores/</code>, <code>background/</code></td><td>143 / 130 / 66</td><td>Shared UI, Zustand stores, background jobs</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var rows=[
+    {label:'Apps',y:40,items:['sim','realtime','desktop','docs','extension','pii','sim-cli','sim-setup'],kind:'app'},
+    {label:'Domain packages',y:170,items:['workflow-renderer','auth-ui','platform-authz','workflow-persistence','desktop-bridge','audit','auth','runtime-secrets'],kind:'pkg'},
+    {label:'Data and protocols',y:300,items:['db','deployment-config','realtime-protocol','workflow-types','browser-protocol','terminal-protocol','browser-extension-protocol','emcn'],kind:'pkg'},
+    {label:'Foundation',y:430,items:['logger','security','utils'],kind:'base'}
+  ];
+  var deps={
+    'sim':['audit','auth','auth-ui','browser-extension-protocol','browser-protocol','db','deployment-config','desktop-bridge','emcn','logger','platform-authz','realtime-protocol','runtime-secrets','security','terminal-protocol','utils','workflow-persistence','workflow-renderer','workflow-types'],
+    'realtime':['audit','auth','db','logger','platform-authz','realtime-protocol','runtime-secrets','security','utils','workflow-persistence','workflow-types'],
+    'desktop':['browser-protocol','desktop-bridge','logger','security','terminal-protocol','utils','auth-ui','emcn'],
+    'docs':['deployment-config','emcn','logger','utils','workflow-renderer'],
+    'extension':['browser-extension-protocol','emcn','logger','utils'],
+    'sim-cli':['utils'],'sim-setup':['deployment-config','security','utils'],
+    'audit':['db','logger','security','utils'],'auth':['db'],'platform-authz':['db','realtime-protocol'],
+    'workflow-persistence':['db','logger','utils','workflow-types'],'desktop-bridge':['browser-protocol','terminal-protocol','utils'],
+    'workflow-renderer':['emcn','utils','workflow-types'],'runtime-secrets':['logger','security','utils'],
+    'db':['logger','security','utils'],'deployment-config':['utils'],'emcn':['utils'],'logger':['utils'],'terminal-protocol':['utils']
+  };
+  var notes={
+    'sim':'The Next.js app: UI, API routes and the workflow executor.',
+    'realtime':'Collaborative Socket.IO server. Avoids Next.js, React, the executor and provider SDKs; calls apps/sim only over internal HTTP.',
+    'desktop':'Electron shell around the hosted web app.','docs':'Documentation site.','extension':'Browser extension.',
+    'pii':'Python service outside the JS and turbo build.','sim-cli':'The sim command line tool.','sim-setup':'Setup and self-hosting helper.',
+    'db':'Database schema and client (Drizzle, Postgres). Both apps share Better Auth sessions through it.',
+    'utils':'Shared helpers (ids, retry, errors, coercion). Everything bottoms out here.','logger':'createLogger, used instead of console.log.',
+    'security':'Security primitives.','emcn':'UI component library.','audit':'Audit log recording.','auth':'Better Auth integration.',
+    'platform-authz':'Authorization checks shared by both apps.','workflow-types':'Shared workflow type definitions.',
+    'workflow-persistence':'Reads and writes workflows to the database.','workflow-renderer':'Renders workflow graphs in the app and the docs.'
+  };
+  var W=120,H=32,NS='http://www.w3.org/2000/svg',svg=document.getElementById('map'),pos={},kind={};
+  function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e}
+  var gE=el('g',{id:'edges'}),gN=el('g',{});svg.appendChild(gE);svg.appendChild(gN);
+  rows.forEach(function(r){
+    var t=el('text',{x:8,y:r.y-12,class:'rowlabel'});t.textContent=r.label;gN.appendChild(t);
+    var n=r.items.length,gap=(1000-16-n*W)/(n+1);if(gap<8)gap=8;
+    r.items.forEach(function(name,i){
+      var x=8+gap+i*(W+gap),y=r.y;pos[name]={x:x,y:y};kind[name]=r.kind;
+      var g=el('g',{class:'node',tabindex:0,role:'button','data-n':name,'aria-label':name});
+      var fill='var(--'+r.kind+'-bg)',stroke='var(--'+r.kind+')';
+      if(r.kind==='app'){fill='var(--app-bg)';stroke='var(--app)'}
+      g.appendChild(el('rect',{x:x,y:y,width:W,height:H,rx:5,fill:fill,stroke:stroke}));
+      var tx=el('text',{x:x+W/2,y:y+H/2+4,'text-anchor':'middle'});tx.textContent=name.length>16?name.slice(0,15)+'…':name;
+      var ti=el('title',{});ti.textContent=name;g.appendChild(ti);g.appendChild(tx);gN.appendChild(g);
+      g.addEventListener('click',function(){sel(name)});
+      g.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();sel(name)}});
+    });
+  });
+  var edges=[];
+  Object.keys(deps).forEach(function(a){deps[a].forEach(function(b){
+    var p=pos[a],q=pos[b];if(!p||!q)return;
+    var x1=p.x+W/2,y1=p.y+H,x2=q.x+W/2,y2=q.y,m=(y1+y2)/2;
+    var path=el('path',{d:'M'+x1+','+y1+' C'+x1+','+m+' '+x2+','+m+' '+x2+','+y2,class:'edge'});
+    gE.appendChild(path);edges.push({a:a,b:b,p:path});
+  })});
+  var info=document.getElementById('info'),cur=null;
+  function sel(name){
+    if(cur===name){cur=null;svg.classList.remove('dim');edges.forEach(function(e){e.p.setAttribute('class','edge')});info.textContent='Select a workspace to see its connections.';return}
+    cur=name;svg.classList.add('dim');var out=[],inn=[];
+    edges.forEach(function(e){var c='edge';if(e.a===name){c+=' out';out.push(e.b)}else if(e.b===name){c+=' in';inn.push(e.a)}e.p.setAttribute('class',c)});
+    function list(a){return a.length?a.map(function(x){return '<code>'+x+'</code>'}).join(', '):'none'}
+    info.innerHTML='<strong><code>@sim/'+name+'</code></strong> '+(notes[name]||'')+'<br>Depends on ('+out.length+'): '+list(out)+'<br>Used by ('+inn.length+'): '+list(inn);
+  }
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'default'});</script>
+</body></html>
